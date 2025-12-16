@@ -1,15 +1,41 @@
-# Ask for username
-read -p "Enter your username: " username
-[ -z "$username" ] && {
-  echo "Username cannot be empty."
-  exit 1
-}
+#!/data/data/com.termux/files/usr/bin/bash
+set -e
+# ===== Colors (safe) =====
+if [ -t 1 ]; then
+  RED='\e[1;31m'
+  GREEN='\e[1;32m'
+  YELLOW='\e[1;33m'
+  BLUE='\e[1;34m'
+  CYAN='\e[1;36m'
+  DIM='\e[2m'
+  RESET='\e[0m'
+else
+  RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; DIM=''; RESET=''
+fi
 
-# Create personal environment
-mkdir -p ~/users/"$username"
-cat > ~/users/"$username"/.bashrc <<EOF
+log()   { echo -e "${CYAN}[*]${RESET} $1"; }
+ok()    { echo -e "${GREEN}[✔]${RESET} $1"; }
+warn()  { echo -e "${YELLOW}[!]${RESET} $1"; }
+error() { echo -e "${RED}[✘]${RESET} $1"; }
+### ========= USERNAME =========
+log "Creating new environment"
+read -p "Enter your username: " username
+[ -z "$username" ] && { error "Username cannot be empty"; exit 1; }
+ok "Username set: $username"
+
+USER_HOME="$HOME/users/$username"
+PASS_FILE="$HOME/.${username}_pass"
+LOGIN_SCRIPT="$HOME/login-$username.sh"
+
+log "Preparing private home directory"
+mkdir -p "$USER_HOME"
+ok "Directory created at $USER_HOME"
+
+### ========= CREATE PRIVATE .bashrc =========
+cat > "$USER_HOME/.bashrc" <<'EOF'
 # Clear screen and show fake hacking intro
 clear
+
 typewriter() {
   local text="$1"
   for ((i=0; i<${#text}; i++)); do
@@ -19,7 +45,6 @@ typewriter() {
   echo
 }
 
-# Function: Loading animation
 loading_animation() {
   local msg="$1"
   echo -ne "\e[0;32m$msg"
@@ -29,16 +54,15 @@ loading_animation() {
   done
   echo -e "\e[0m"
 }
-# Clear screen and show animated intro
+
 clear
-typewriter "[+] Access Granted - Welcome, JuniorSir"
+typewriter "[+] Access Granted - Welcome, sir"
 for i in {1..5}; do
   loading_animation "[~] Initializing Module $i"
 done
 
 # Optional ASCII Art (figlet, etc.)
 echo -e "\e[1;30m"
-# figlet "JuniorSir" | lolcat
 echo -e "\e[0m"
 
 # Show last 5 commands in dim style
@@ -54,75 +78,79 @@ alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
 
-# File watcher
-watch_file() {
-  while inotifywait -e close_write "$1"; do
-    bash "$1"
-  done
+# System status
+get_battery() {
+  command -v termux-battery-status >/dev/null &&
+  termux-battery-status | jq -r '.percentage' 2>/dev/null
 }
 
-# System status and git info
-get_battery() { termux-battery-status | jq -r '.percentage' 2>/dev/null; }
 show_exit_code() {
   local code=$?
   [ $code -ne 0 ] && echo -e " \e[1;31m✘ $code\e[0m"
 }
+
 quotes=(
-  "Trust no one." "Access granted." "Stay frosty."
-  "Welcome to the matrix." "Code is poetry."
-  "Injecting some chaos." "Pwned by $username."
+  "Trust no one."
+  "Access granted."
+  "Stay frosty."
+  "Welcome to the matrix."
+  "Code is poetry."
 )
-if [[ $- == *i* ]]; then
-  echo -e "\n\e[1;32m[+] ${quotes[RANDOM % ${#quotes[@]}]}\e[0m\n"
+
+if [ "${#quotes[@]}" -gt 0 ]; then
+  idx=$((RANDOM % ${#quotes[@]}))
+  echo -e "\n\e[1;32m[+] ${quotes[$idx]}\e[0m\n"
 fi
 
-# Custom prompt
+# 🔥 ORIGINAL PROMPT COLORS (UNCHANGED)
 export PS1='\
-\e[90m╭─[\e[36m⏱ \t\e[90m]──[\e[1;35m$username\e[90m]──[\e[33m⚡$(get_battery)%\e[90m]\n\
+\e[90m╭─[\e[36m⏱ \t\e[90m]──[\e[1;35msir\e[90m]──[\e[33m⚡$(get_battery)%\e[90m]\n\
 ╰─[\e[1;34m\w\e[90m]$(show_exit_code)\e[0m\n\
 \e[1;32m➜ \e[0m'
 
-# Start in home directory
 cd ~
 
-# Disable auto-execution by Bash (use custom prompt loop instead)
 run_custom_shell() {
   while true; do
-    # Show your custom prompt
-    echo -ne "\n\e[1;32m→ \e[0m"
-    read -e -r cmd  # -e enables arrow key history, -r keeps literal input
-
+    read -e -r -p $'\n\e[1;32m➜ \e[0m' cmd
     [[ -z "$cmd" ]] && continue
 
-    # Handle exit manually
     if [[ "$cmd" == "exit" ]]; then
       echo -e "\n\e[1;32m[+] Session Ended\e[0m"
       break
     fi
 
-    # Skip certain commands from being wrapped
     if [[ "$cmd" =~ ^(nano|vi|vim|bash|less|more|man|top|clear|reset|history|tail).* ]]; then
       eval "$cmd"
       continue
     fi
 
-    # Show with timestamp and color
-    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    timestamp=$(date +"%Y-%m-%d %H:%M:%S")
     echo -e "\n\e[1;34m[$timestamp] \$ \e[0;36m$cmd\e[0m"
     echo -e "\e[1;34m┌─[ Executing: \e[0;36m$cmd\e[1;34m ]\e[0m"
 
-    local start=$(date +%s%3N)
-    output=$(eval "$cmd" 2>&1)
-    code=$?
+    start=$(date +%s%3N)
 
-    if [[ "$cmd" =~ ^(ls|ll|ls\ .*)$ ]]; then
-      echo -e "\e[0;37m│ ${output//$'\n'/  }\e[0m"
+    if [[ "$cmd" == "cd" || "$cmd" == cd\ * ]]; then
+      eval "$cmd"
+      code=$?
+
+      if [[ "$PWD" == "$HOME" ]]; then
+        output="home"
+      else
+        output="${PWD/#$HOME/~}"
+      fi
     else
-      i=0
-      while IFS= read -r line; do
-        (( i++ % 2 == 0 )) && echo -e "\e[0;37m│ $line\e[0m" || echo -e "\e[0;90m│ $line\e[0m"
-      done <<< "$output"
+      output=$(eval "$cmd" 2>&1)
+      code=$?
     fi
+
+    i=0
+    while IFS= read -r line; do
+      (( i++ % 2 == 0 )) \
+        && echo -e "\e[0;37m│ $line\e[0m" \
+        || echo -e "\e[0;90m│ $line\e[0m"
+    done <<< "$output"
 
     end=$(date +%s%3N)
     duration=$(awk "BEGIN {printf \"%.2f\", ($end - $start)/1000}")
@@ -135,54 +163,64 @@ run_custom_shell() {
   done
 }
 
-# Launch custom shell only in interactive sessions
 [[ $- == *i* ]] && run_custom_shell
 
+cd "$HOME"
 EOF
 
-# Set secure password
-read -sp "Set password for $username: " pass; echo
-echo -n "$pass" | sha256sum | awk '{print $1}' > ~/.${username}_pass
-chmod 600 ~/.${username}_pass
+### ========= PASSWORD SET =========
+log "Setting password for $username"
+read -sp "Password: " pass
+echo
+[ -z "$pass" ] && { error "Password cannot be empty"; exit 1; }
+ok "Password set"
 
-# Create login launcher
-cat > ~/login-$username.sh <<EOF
+echo -n "$pass" | sha256sum | awk '{print $1}' > "$PASS_FILE"
+chmod 600 "$PASS_FILE"
+unset pass
+
+### ========= CREATE LOGIN SCRIPT =========
+cat > "$LOGIN_SCRIPT" <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
 
-# Step 1: Prompt for password
-pass_input=\$(termux-dialog -p -t "Login: $username" -i "Enter your password" | jq -r '.text')
+PASS_FILE="$PASS_FILE"
+USER_HOME="$USER_HOME"
+
+if command -v termux-dialog >/dev/null; then
+  pass_input=\$(termux-dialog -p -t "Login: $username" | jq -r '.text')
+else
+  echo -n "Password: "
+  read -s pass_input
+  echo
+fi
+
 [ -z "\$pass_input" ] || [ "\$pass_input" = "null" ] && {
-    termux-toast -g middle -s "Cancelled"
-    exit 1
+  echo "Login cancelled."
+  exit 1
 }
 
-# Step 2: Verify password hash
 input_hash=\$(echo -n "\$pass_input" | sha256sum | awk '{print \$1}')
-stored_hash=\$(cat ~/.${username}_pass 2>/dev/null)
-[ "\$input_hash" != "\$stored_hash" ] && {
-    termux-toast -g middle -s "Access denied"
-    exit 1
-}
+stored_hash=\$(cat "\$PASS_FILE" 2>/dev/null)
 
-# Step 3: Define private environment paths
-ORIG_HOME=\$HOME
-PRIVATE_HOME=\$ORIG_HOME/users/$username
-mkdir -p "\$PRIVATE_HOME"
+if [ "\$input_hash" != "\$stored_hash" ]; then
+  command -v termux-toast >/dev/null && termux-toast "Access denied"
+  echo "Access denied"
+  exit 1
+fi
 
-# Step 4: Launch subshell with new HOME
-termux-toast -g top "Welcome $username"
-env HOME="\$PRIVATE_HOME" bash --rcfile <(
-cat <<'INNER_EOF'
-# Custom RC file for private session
-cd "\$HOME"
-clear
-echo -e "\e[1;32mWelcome to your private environment, $username.\e[0m"
-export HOME="\$HOME"
+command -v termux-toast >/dev/null && termux-toast "Welcome $username"
 
-# Source private .bashrc if exists
-[ -f "\$HOME/.bashrc" ] && source "\$HOME/.bashrc"
-INNER_EOF
-)
+env HOME="\$USER_HOME" bash --rcfile "\$USER_HOME/.bashrc"
 EOF
 
-chmod +x ~/login-$username.sh
+log "Installing login command"
+mv "$LOGIN_SCRIPT" "$PATH/$username"
+chmod +x "$PATH/$username"
+ok "Command '$username' installed"
+### ========= DONE =========
+echo
+echo
+echo -e "${GREEN}====================================${RESET}"
+echo -e "${GREEN}  ✔ Environment created successfully${RESET}"
+echo -e "${GREEN}  ▶ Start by typing: ${YELLOW}$username${RESET}"
+echo -e "${GREEN}====================================${RESET}"
